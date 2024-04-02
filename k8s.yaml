@@ -1,0 +1,16 @@
+---
+- hosts: all
+  tasks:
+   - name: Set selinux to permissive mode
+     ansible.posix.selinux:
+       policy: targeted
+       state: permissive
+
+   - name: disable swap
+     command: swapoff -a
+
+   - name: comment out swap entries in /etc/fstab
+     lineinfile:
+       path: /etc/fstab
+       regexp: '^UUID=[a-z0-9-]+\s+swap\s+'
+       state: absent
