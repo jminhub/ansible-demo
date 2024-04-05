@@ -9,8 +9,96 @@
    - name: disable swap
      command: swapoff -a
 
+   - name: stop firewalld
+     service:
+       name: firewalld
+       state: stopped
+       enabled: false
+
    - name: comment out swap entries in /etc/fstab
      lineinfile:
        path: /etc/fstab
        regexp: '^UUID=[a-z0-9-]+\s+swap\s+'
        state: absent
+
+   - name: Load br_netfilter kernel module
+     modprobe:
+       name: br_netfilter
+       state: present
+
+   - name: Load overlay kernel module
+     modprobe:
+       name: overlay
+       state: present
+   
+   - name: Add br_netfilter sysctl.conf
+     sysctl:
+       name: "{{ item.name }}"
+       value: "{{ item.value }}"
+       state: present
+       sysctl_set: yes
+     with_items:
+       - { name: "net.bridge.bridge-nf-call-ip6tables", value: 1 }
+       - { name: "net.bridge.bridge-nf-call-iptables", value: 1 }
+       - { name: "net.ipv4.ip_forward", value: 1 }
+
+   
+   - name: Docker install
+     get_url:
+       url:  https://download.docker.com/linux/centos/docker-ce.repo
+       dest: /etc/yum.repos.d/docker-ce.repo
+       
+
+
+
+   - name: Add Kubernetes repo
+     yum_repository:
+       name: kubernetes
+       description: Kubernetes Repository
+       baseurl: https://pkgs.k8s.io/core:/stable:/v1.29/rpm
+       gpgkey: https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key
+    
+   - name: Install containerd packages
+     yum:
+       name: containerd
+       state: present
+   
+   - name: Install kubeadm
+     yum:
+       name: kubeadm
+       state: present
+
+   - name: copy container config file
+     copy:
+       src: config.toml
+       dest: /etc/containerd/config.toml
+
+   - name: enable service containerd kubelet
+     service:
+       name: "{{ item }}"
+       state: started
+       enabled: yes
+     loop:
+       - containerd
+       - kubelet
+
+   - name: copy /etc/hosts
+     copy:
+       src: /etc/hosts
+       dest: /etc/hosts
+
+   - name: init cluster
+     shell: |
+       kubeadm init --apiserver-advertise-address=172.16.0.101 \
+                    --pod-network-cidr=192.168.0.0/16 \
+                    --token=kdigit.1234567890hellow
+     when: inventory_hostname in groups['controlplanes']
+     ignore_errors: yes
+
+   - name: join cluster
+     shell: |
+       kubeadm join --token=kdigit.1234567890hellow \
+                    --discovery-token-unsafe-skip-ca-verification \
+                    172.16.0.101:6443
+     
+     when: inventory_hostname in groups['worker_nodes']
